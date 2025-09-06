@@ -1,0 +1,9 @@
+# Runtime dependencies for production
+# Use Hikari with speedups extras (installs aiohttp speedups, ciso8601, orjson)
+hikari[speedups]
+hikari-lightbulb
+python-dotenv
+aiohttp
+rapidfuzz
+Pillow
+uvloop; platform_system != "Windows"
