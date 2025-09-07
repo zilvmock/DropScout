@@ -1,0 +1,15 @@
+services:
+  dropscout:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dropscout:gitbuild
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      TWITCH_ACCESS_TOKEN: ${TWITCH_ACCESS_TOKEN}
+      TWITCH_REFRESH_TOKEN: ${TWITCH_REFRESH_TOKEN}
+    volumes:
+      - dropscout-data:/app/data
+volumes:
+  dropscout-data:

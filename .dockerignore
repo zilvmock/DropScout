@@ -1,0 +1,53 @@
+# Exclude files from the Docker build context to keep images small,
+# builds fast, and secrets out of the image.
+
+# VCS
+.git
+.gitignore
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage*
+htmlcov/
+.mypy_cache/
+.pytype/
+.dmypy.json
+.ruff_cache/
+.cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Editors/OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local environment files (keep example)
+.env
+.env.*
+!.env.example
+
+# Build/packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Docker
+Dockerfile*
+!.dockerignore
+
+# Runtime data (mounted as a volume at /app/data)
+data/
+
