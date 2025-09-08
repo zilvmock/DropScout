@@ -31,6 +31,8 @@ class DropsDiffer:
 		activated: list[CampaignRecord] = []
 		for c in curr:
 			ps = prev_status.get(c.id)
-			if c.status == "ACTIVE" and ps and ps != "ACTIVE":
+			# Treat campaigns that newly appear as ACTIVE (no previous status)
+			# or that transitioned from a non-ACTIVE status as activated.
+			if c.status == "ACTIVE" and (ps is None or ps != "ACTIVE"):
 				activated.append(c)
 		return DropsDiff(activated=activated)
