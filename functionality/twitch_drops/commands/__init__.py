@@ -16,11 +16,15 @@ from .common import SharedContext
 
 
 def _is_production() -> bool:
-    env = (os.getenv("ENV") or os.getenv("DROPSCOUT_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
-    return (
-        (os.getenv("PRODUCTION") or os.getenv("IS_PRODUCTION") or "false").strip().lower() == "true"
-        or env in ("prod", "production")
-    )
+    """Return True if running in production; default to production.
+
+    Single toggle via EVIRONMENT env var (intentional spelling):
+    - EVIRONMENT=dev  -> development mode (not production)
+    - EVIRONMENT=prod -> production mode
+    - EVIRONMENT unset -> production mode (default)
+    """
+    mode = (os.getenv("EVIRONMENT") or "prod").strip().lower()
+    return mode != "dev"
 
 
 def register_commands(client: lightbulb.Client) -> List[str]:
@@ -71,4 +75,3 @@ def register_commands(client: lightbulb.Client) -> List[str]:
         names.append(reg_dev_notify(client, shared))
 
     return names
-
