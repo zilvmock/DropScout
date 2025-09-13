@@ -23,6 +23,8 @@ from .config import GuildConfigStore
 # Optional collage of benefit icons
 from .images import build_benefits_collage
 from .models import CampaignRecord
+from .notifier import DropsNotifier
+from .differ import DropsDiff
 # Note: export functionality removed per request
 
 
@@ -417,8 +419,48 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 				e.set_footer(hint)
 			await ctx.respond(embeds=[e])
 
+	# Dev-only: trigger notifier path with a random active campaign
+	ENV = (os.getenv("ENV") or os.getenv("DROPSCOUT_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
+	IS_PROD = (os.getenv("PRODUCTION") or os.getenv("IS_PRODUCTION") or "false").strip().lower() == "true" or ENV in ("prod", "production")
+	if not IS_PROD:
+		@client.register
+		class DropsNotifyRandom(
+			lightbulb.SlashCommand,
+			name="drops_notify_random",
+			description="Dev-only: trigger notifier for a random ACTIVE campaign",
+		):
+			"""Pick a random currently ACTIVE campaign and call the notifier.
+
+			Sends messages to the same configured channels as the scheduled monitor
+			would. This is intended for manual verification in non-production.
+			"""
+
+			@lightbulb.invoke
+			async def invoke(self, ctx: lightbulb.Context) -> None:
+				try:
+					await ctx.defer(ephemeral=True)
+				except Exception:
+					pass
+				recs = await _get_campaigns_cached()
+				active = [r for r in recs if r.status == "ACTIVE"]
+				if not active:
+					await ctx.respond("No ACTIVE campaigns available to notify.", ephemeral=True)
+					return
+				import random
+				r = random.choice(active)
+				notifier = DropsNotifier(ctx.client.app, guild_store)
+				try:
+					await notifier.notify(DropsDiff(activated=[r]))
+					await ctx.respond(
+						f"Triggered notifier for: {(r.game_name or r.name or r.id)}.",
+						ephemeral=True,
+					)
+				except Exception:
+					await ctx.respond("Failed to trigger notifier.", ephemeral=True)
+
+
    # Return the set of commands we register (for testing convenience)
-	return [
+	names = [
 		"hello",
 		"help",
 		"drops_active",
@@ -427,4 +469,6 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 		"drops_channel",
 		"drops_search_game",
 	]
-
+	if not IS_PROD:
+		names.append("drops_notify_random")
+	return names
