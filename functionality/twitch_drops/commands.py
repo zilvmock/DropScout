@@ -16,6 +16,7 @@ import hikari
 from hikari.files import Bytes, Resourceish
 import lightbulb
 from lightbulb.commands import options as opt
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from .fetcher import DropsFetcher
 from .embeds import build_campaign_embed
@@ -48,6 +49,59 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 
 	_CACHE_DATA: list[CampaignRecord] = []
 	_CACHE_EXP: float = 0.0
+
+	def _get_async(ctx: lightbulb.Context, name: str) -> Optional[Callable[..., Awaitable[Any]]]:
+		"""Return an async callable method from ctx if present, else None.
+
+		Casts to an awaitable callable to satisfy type checkers.
+		"""
+		fn = getattr(ctx, name, None)
+		if fn is None or not callable(fn):
+			return None
+		return cast(Callable[..., Awaitable[Any]], fn)
+
+	async def _finalize_interaction(ctx: lightbulb.Context, *, message: str | None = None) -> None:
+		"""Clear or update the deferred 'thinking…' placeholder.
+
+		Tries to delete the initial response; if not available, edits it; as a
+		last resort, sends a minimal ephemeral confirmation.
+		"""
+		# Try delete initial/last response first to avoid clutter
+		fn = _get_async(ctx, "delete_last_response")
+		if fn is not None:
+			try:
+				await fn()
+				return
+			except Exception:
+				pass
+		fn = _get_async(ctx, "delete_initial_response")
+		if fn is not None:
+			try:
+				await fn()
+				return
+			except Exception:
+				pass
+		# Fall back to editing the placeholder
+		content = message if (message is not None and message != "") else "Done."
+		fn = _get_async(ctx, "edit_last_response")
+		if fn is not None:
+			try:
+				await fn(content=content)
+				return
+			except Exception:
+				pass
+		fn = _get_async(ctx, "edit_initial_response")
+		if fn is not None:
+			try:
+				await fn(content=content)
+				return
+			except Exception:
+				pass
+		# Absolute last resort: ephemeral follow-up note
+		try:
+			await ctx.respond(content, ephemeral=True)
+		except Exception:
+			pass
 
 	async def _get_campaigns_cached() -> list[CampaignRecord]:
 		nonlocal _CACHE_DATA, _CACHE_EXP
@@ -238,6 +292,8 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 					attach_aligned.append(None)
 				embeds.append(e)
 			await _send_embeds(ctx, embeds, attach_aligned)
+			# Clear the deferred placeholder
+			await _finalize_interaction(ctx)
 
 	@client.register
 	class DropsChannel(
@@ -321,6 +377,8 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 					attach_aligned.append(None)
 				embeds.append(e)
 			await _send_embeds(ctx, embeds, attach_aligned)
+			# Clear the deferred placeholder
+			await _finalize_interaction(ctx)
 
 	@client.register
 	class DropsSearchGame(
@@ -418,6 +476,8 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 			if hint:
 				e.set_footer(hint)
 			await ctx.respond(embeds=[e])
+			# Clear the deferred placeholder
+			await _finalize_interaction(ctx)
 
 	# Dev-only: trigger notifier path with a random active campaign
 	ENV = (os.getenv("ENV") or os.getenv("DROPSCOUT_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
@@ -455,6 +515,8 @@ def register_commands(client: lightbulb.Client) -> list[str]:
 						f"Triggered notifier for: {(r.game_name or r.name or r.id)}.",
 						ephemeral=True,
 					)
+					# Clear the deferred placeholder
+					await _finalize_interaction(ctx)
 				except Exception:
 					await ctx.respond("Failed to trigger notifier.", ephemeral=True)
 
