@@ -206,16 +206,39 @@ async def _refresh_token(
 	refresh_token: str,
 	client_secret: Optional[str] = None,
 ) -> Dict[str, Any]:
-	payload = {
-		"grant_type": "refresh_token",
-		"refresh_token": refresh_token,
-		"client_id": client_id,
-	}
-	if client_secret:
-		payload["client_secret"] = client_secret
-	async with session.post("https://id.twitch.tv/oauth2/token", data=payload) as r:
-		r.raise_for_status()
-		return await r.json()
+    """Attempt to refresh via id.twitch.tv first, then passport.twitch.tv.
+
+    Twitch first‑party (Android) flows sometimes use the Passport domain for
+    token refresh. If the standard id.twitch.tv endpoint rejects the request,
+    fall back to passport with the same payload.
+    """
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+    }
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    errors: list[str] = []
+    for endpoint in ("https://id.twitch.tv/oauth2/token", "https://passport.twitch.tv/oauth2/token"):
+        try:
+            async with session.post(endpoint, data=payload) as r:
+                txt = await r.text()
+                if r.status >= 400:
+                    # Collect details and try next endpoint
+                    try:
+                        data = await r.json()
+                    except Exception:
+                        data = None
+                    errors.append(f"{endpoint} -> {r.status} {txt or data}")
+                    continue
+                return await r.json()
+        except Exception as e:
+            errors.append(f"{endpoint} -> {e}")
+            continue
+    # If neither endpoint succeeded, raise a consolidated error
+    raise RuntimeError("refresh failed: " + "; ".join(errors))
 async def ensure_env_access_token(session: aiohttp.ClientSession) -> str:
 	"""Return a valid access token from the environment, refreshing if needed.
 
@@ -228,7 +251,8 @@ async def ensure_env_access_token(session: aiohttp.ClientSession) -> str:
 	ok, val = await _validate_token(session, access) if access else (False, None)
 	if ok and is_first_party_validate(val):
 		return access
-	# Attempt first‑party refresh using Android client (no secret)
+	# Attempt first‑party refresh using Android client (no secret). Try both
+	# id.twitch.tv and passport.twitch.tv endpoints internally.
 	errors: list[str] = []
 	if refresh:
 		try:
@@ -243,9 +267,29 @@ async def ensure_env_access_token(session: aiohttp.ClientSession) -> str:
 					return a2
 		except Exception as e:
 			errors.append(f"android refresh failed: {e}")
+
+	# Optional: if provided, allow a one-time regeneration using a different
+	# refresh token source (e.g., TWITCH_REFRESH_TOKEN_ANDROID). This helps
+	# recover when the default refresh token belongs to a different client.
+	alt_refresh = os.getenv("TWITCH_REFRESH_TOKEN_ANDROID", "") or ""
+	if alt_refresh and alt_refresh != refresh:
+		try:
+			r = await _refresh_token(session, ANDROID_CLIENT_ID, alt_refresh)
+			a2 = r.get("access_token")
+			rf2 = r.get("refresh_token", alt_refresh)
+			if a2:
+				ok, val = await _validate_token(session, a2)
+				if ok and is_first_party_validate(val):
+					os.environ["TWITCH_ACCESS_TOKEN"] = a2
+					os.environ["TWITCH_REFRESH_TOKEN"] = rf2
+					return a2
+		except Exception as e:
+			errors.append(f"android alt refresh failed: {e}")
+	# All attempts failed; surface a clear error with collected attempts
 	raise RuntimeError(
 		"Service token invalid and refresh failed using Android client. "
 		"Ensure the refresh token belongs to an Android device authorization. "
+		"Tried id.twitch.tv and passport.twitch.tv refresh endpoints. Details: "
 		+ "; ".join(errors)
 	)
 

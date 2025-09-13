@@ -5,6 +5,8 @@ from typing import cast
 import pytest
 
 import functionality.twitch_drops.commands as commands_mod
+import functionality.twitch_drops.fetcher as fetcher_mod
+import functionality.twitch_drops.images as images_mod
 import lightbulb
 from functionality.twitch_drops.models import CampaignRecord, BenefitRecord
 
@@ -69,13 +71,13 @@ async def test_drops_this_week_clears_deferred_placeholder(monkeypatch):
         async def fetch_condensed(self):
             return [_active_week_campaign()]
 
-    monkeypatch.setattr(commands_mod, "DropsFetcher", _FakeFetcher)
+    monkeypatch.setattr(fetcher_mod, "DropsFetcher", _FakeFetcher)
 
     # Do not attempt collages (avoid network/IO). Force fallback path.
     async def _no_collage(*args, **kwargs):
         return None, None
 
-    monkeypatch.setattr(commands_mod, "build_benefits_collage", _no_collage)
+    monkeypatch.setattr(images_mod, "build_benefits_collage", _no_collage)
 
     # Register commands using a fake client to capture the command classes
     fake = FakeClient()
