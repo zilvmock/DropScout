@@ -8,6 +8,7 @@ mirroring the behavior used by slash commands.
 """
 
 import asyncio
+import copy
 import os
 from dataclasses import dataclass
 from typing import Iterable, List
@@ -150,7 +151,7 @@ class DropsNotifier:
 		for target in targets:
 			favorites_map = self.favorites_store.get_guild_favorites(target.guild_id)
 			for campaign, base_embed, png_bytes, filename in payloads:
-				embed = base_embed.copy()
+				embed = copy.deepcopy(base_embed)
 				keys = self._resolve_campaign_keys(campaign)
 				watchers = self._collect_watchers(favorites_map, keys)
 				content = None
