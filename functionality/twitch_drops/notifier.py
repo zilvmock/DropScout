@@ -159,9 +159,6 @@ class DropsNotifier:
 					mention_text = self._join_mentions(watchers, limit=1800)
 					if mention_text:
 						content = f"Favorites alert: {mention_text}"
-						field_text = self._join_mentions(watchers, limit=1024)
-						if field_text:
-							embed.add_field(name="Favorited By", value=field_text, inline=False)
 				try:
 					if png_bytes and filename:
 						attachment = Bytes(png_bytes, filename)

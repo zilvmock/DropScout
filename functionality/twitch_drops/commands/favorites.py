@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
+import asyncio
+
 import hikari
 import lightbulb
 from lightbulb import context as lb_context
 from lightbulb.commands import options as opt
+from hikari.files import Bytes
 
 from ..game_catalog import GameEntry
 from ..models import CampaignRecord
+from ..embeds import build_campaign_embed
+from ..images import build_benefits_collage
+from ..notifier import DropsNotifier
 from .common import SharedContext
 
 CUSTOM_ID_PREFIX = "drops:fav"
@@ -252,6 +258,116 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				embeds=[embed],
 				components=components,
 			)
+
+	@group.register
+	class DropsFavoritesCheck(
+		lightbulb.SlashCommand,
+		name="check",
+		description="Check now active campaigns for your favorite games.",
+	):
+		@lightbulb.invoke
+		async def invoke(self, ctx: lightbulb.Context) -> None:
+			if not ctx.guild_id:
+				await ctx.respond("Favorites can only be managed inside a server.", ephemeral=True)
+				return
+			user_obj = getattr(ctx, "user", None) or getattr(ctx, "member", None) or getattr(ctx, "author", None)
+			if user_obj is None:
+				await ctx.respond("Could not resolve your user information.", ephemeral=True)
+				return
+			try:
+				guild_id = int(ctx.guild_id)
+				user_id = int(getattr(user_obj, "id"))
+			except Exception:
+				await ctx.respond("Could not resolve your user information.", ephemeral=True)
+				return
+			try:
+				await ctx.defer()
+			except Exception:
+				pass
+
+			favorites = shared.favorites_store.get_user_favorites(guild_id, user_id)
+			if not favorites:
+				await shared.finalize_interaction(ctx, message="You have no favorite games yet.")
+				return
+
+			recs = await shared.get_campaigns_cached()
+			entry_cache: dict[str, GameEntry | None] = {}
+			matches: list[CampaignRecord] = []
+			for rec in recs:
+				if rec.status != "ACTIVE":
+					continue
+				for fav_key in favorites:
+					entry = entry_cache.get(fav_key)
+					if entry is None:
+						entry = shared.game_catalog.get(fav_key)
+						entry_cache[fav_key] = entry
+					if entry and shared.game_catalog.matches_campaign(entry, rec):
+						matches.append(rec)
+						break
+			if not matches:
+				await shared.finalize_interaction(ctx, message="No active campaigns for your favorites right now.")
+				return
+
+			channel_id = shared.guild_store.get_channel_id(guild_id)
+			if channel_id is None:
+				try:
+					channel_id = int(ctx.channel_id)
+					shared.guild_store.set_channel_id(guild_id, channel_id)
+				except Exception:
+					channel_id = int(ctx.channel_id)
+
+			notifier = DropsNotifier(
+				ctx.client.app,
+				shared.guild_store,
+				shared.favorites_store,
+				shared.game_catalog,
+			)
+			favorites_map = shared.favorites_store.get_guild_favorites(guild_id)
+
+			attachments_budget = shared.MAX_ATTACH_PER_CMD if shared.MAX_ATTACH_PER_CMD > 0 else None
+			attachments_used = 0
+			sent = 0
+			for campaign in matches:
+				embed = build_campaign_embed(campaign, title_prefix="Now Active")
+				png_bytes: bytes | None = None
+				filename: str | None = None
+				if attachments_budget is None or attachments_used < attachments_budget:
+					png_bytes, filename = await build_benefits_collage(
+						campaign,
+						limit=shared.ICON_LIMIT if shared.ICON_LIMIT >= 0 else 9,
+						icon_size=(shared.ICON_SIZE, shared.ICON_SIZE),
+						columns=shared.ICON_COLUMNS,
+					)
+					if png_bytes and filename:
+						attachments_used += 1
+				if not png_bytes and campaign.benefits and campaign.benefits[0].image_url:
+					embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
+				attachment = None
+				if png_bytes and filename:
+					attachment = Bytes(png_bytes, filename)
+					embed.set_image(attachment)
+
+				keys = notifier._resolve_campaign_keys(campaign)
+				watcher_ids = set(notifier._collect_watchers(favorites_map, keys))
+				watcher_ids.add(user_id)
+				mention_text = notifier._join_mentions(watcher_ids, limit=1800)
+
+				try:
+					await ctx.client.app.rest.create_message(
+						channel_id,
+						content=mention_text or f"<@{user_id}>",
+						embeds=[embed],
+					)
+					sent += 1
+				except Exception:
+					continue
+				await asyncio.sleep(shared.SEND_DELAY_MS / 1000)
+
+			if sent == 0:
+				await shared.finalize_interaction(ctx, message="Failed to send favorites alerts.")
+				return
+
+			await shared.finalize_interaction(ctx)
 
 	@group.register
 	class DropsFavoritesRemove(

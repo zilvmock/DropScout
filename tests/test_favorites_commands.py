@@ -7,6 +7,7 @@ from functionality.twitch_drops.commands.common import SharedContext
 from functionality.twitch_drops.config import GuildConfigStore
 from functionality.twitch_drops.favorites import FavoritesStore
 from functionality.twitch_drops.game_catalog import GameCatalog, GameEntry
+from functionality.twitch_drops.models import BenefitRecord, CampaignRecord
 
 
 class StubClient:
@@ -61,7 +62,7 @@ def favorites_group(shared: SharedContext):
 
 def test_favorites_commands_group_structure(favorites_group):
 	group, _ = favorites_group
-	assert set(group.subcommands.keys()) == {"view", "add", "remove"}
+	assert set(group.subcommands.keys()) == {"view", "add", "check", "remove"}
 
 	view_cmd = group.subcommands["view"]
 	assert issubclass(view_cmd, lightbulb.SlashCommand)
@@ -78,6 +79,10 @@ def test_favorites_commands_group_structure(favorites_group):
 	remove_option = remove_cmd._command_data.options["game"]
 	assert getattr(remove_option.type, "name", None) == "STRING"
 	assert remove_option.autocomplete_provider is not hikari.UNDEFINED
+
+	check_cmd = group.subcommands["check"]
+	assert issubclass(check_cmd, lightbulb.SlashCommand)
+	assert check_cmd._command_data.options == {}
 
 
 @pytest.mark.asyncio
@@ -125,3 +130,93 @@ async def test_remove_autocomplete_only_user_favorites(favorites_group):
 	ctx = StubAutocompleteContext(focused="ap", guild_id=123, user_id=1)
 	await provider(ctx)
 	assert ctx._choices == [("apex", "apex")]
+
+
+@pytest.mark.asyncio
+async def test_check_sends_now_active_messages(monkeypatch, favorites_group):
+	group, shared = favorites_group
+	check_cmd = group.subcommands["check"]
+	cmd_instance = object.__new__(check_cmd)
+
+	shared.game_catalog.merge_games(
+		[
+			GameEntry(key="valorant", name="Valorant", weight=500),
+		]
+	)
+	shared.game_catalog.set_ready(True)
+	shared.favorites_store.add_favorite(123, 42, "valorant")
+
+	campaign = CampaignRecord(
+		id="camp-1",
+		name="Valorant Drops",
+		status="ACTIVE",
+		game_name="Valorant",
+		game_slug="valorant",
+		game_box_art=None,
+		starts_at=None,
+		ends_at=None,
+		benefits=[BenefitRecord(id="b1", name="Reward", image_url=None)],
+	)
+
+	async def fake_campaigns():
+		return [campaign]
+
+	monkeypatch.setattr(shared, "get_campaigns_cached", fake_campaigns)
+
+	sent_messages = []
+
+	class FakeRest:
+		async def create_message(self, channel_id, content=None, embeds=None):
+			sent_messages.append((int(channel_id), content, embeds))
+
+	class FakeApp:
+		def __init__(self) -> None:
+			self.rest = FakeRest()
+
+	class FakeClient:
+		def __init__(self) -> None:
+			self.app = FakeApp()
+
+	class FakeCtx:
+		def __init__(self) -> None:
+			self.guild_id = 123
+			self.channel_id = 999
+			self.user = type("User", (), {"id": 42})()
+			self.client = FakeClient()
+
+		async def defer(self, *args, **kwargs):
+			return
+
+		async def respond(self, *args, **kwargs):
+			raise AssertionError("respond should not be called in success case")
+
+		async def edit_initial_response(self, *args, **kwargs):
+			return
+
+		async def delete_last_response(self, *args, **kwargs):
+			return
+
+		async def delete_initial_response(self, *args, **kwargs):
+			return
+
+		async def edit_last_response(self, *args, **kwargs):
+			return
+
+	ctx = FakeCtx()
+
+	finalized = []
+
+	async def fake_finalize(ctx_obj, *, message=None):
+		finalized.append(message)
+
+	monkeypatch.setattr(shared, "finalize_interaction", fake_finalize)
+
+	bound_invoke = check_cmd.invoke.__get__(cmd_instance, check_cmd)
+	await bound_invoke(ctx)
+
+	assert sent_messages, "Expected at least one message sent"
+	channel_id, content, embeds = sent_messages[0]
+	assert channel_id == 999
+	assert "<@42>" in (content or "")
+	assert embeds and embeds[0].title
+	assert finalized[-1] is None
