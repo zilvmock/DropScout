@@ -9,26 +9,45 @@ mirroring the behavior used by slash commands.
 
 import asyncio
 import os
+from dataclasses import dataclass
+from typing import Iterable, List
 
 import hikari
 from hikari.files import Bytes
 
+from .config import GuildConfigStore
 from .differ import DropsDiff
 from .embeds import build_campaign_embed
-from .config import GuildConfigStore
+from .favorites import FavoritesStore
+from .game_catalog import GameCatalog
 from .images import build_benefits_collage
+from .models import CampaignRecord
+
+
+@dataclass(frozen=True, slots=True)
+class NotifyTarget:
+	guild_id: int
+	channel_id: int
 
 
 class DropsNotifier:
 	"""Sends change notifications to each configured guild channel."""
 
-	def __init__(self, app: hikari.RESTAware, guild_store: GuildConfigStore) -> None:
+	def __init__(
+		self,
+		app: hikari.RESTAware,
+		guild_store: GuildConfigStore,
+		favorites_store: FavoritesStore,
+		game_catalog: GameCatalog,
+	) -> None:
 		"""Create a notifier bound to a Hikari app with REST access.
 
 		Accepts any object implementing RESTAware (e.g., GatewayBot or RESTBot).
 		"""
 		self.app = app
 		self.guild_store = guild_store
+		self.favorites_store = favorites_store
+		self.game_catalog = game_catalog
 		# Collage + sending behavior (reuse command env vars when present)
 		self.icon_limit = int(os.getenv("DROPS_ICON_LIMIT", "9") or 9)
 		self.icon_size = int(os.getenv("DROPS_ICON_SIZE", "96") or 96)
@@ -38,77 +57,125 @@ class DropsNotifier:
 		self.max_attachments = int(max_att or 0)
 		self.send_delay_ms = int(os.getenv("DROPS_SEND_DELAY_MS", "350") or 350)
 
-	async def _resolve_targets(self) -> list[int]:
-		"""Return the list of channel IDs to notify across all guilds."""
-		channel_ids: list[int] = []
+	async def _resolve_targets(self) -> list[NotifyTarget]:
+		"""Return the list of channels (with guild context) to notify."""
+		targets: list[NotifyTarget] = []
 		try:
 			guilds = await self.app.rest.fetch_my_guilds()
 		except Exception:
 			guilds = []
 		for g in guilds:
-			cid = self.guild_store.get_channel_id(int(g.id))
+			gid = int(g.id)
+			cid = self.guild_store.get_channel_id(gid)
 			if cid:
-				channel_ids.append(cid)
+				targets.append(NotifyTarget(guild_id=gid, channel_id=int(cid)))
 				continue
 			scid = getattr(g, "system_channel_id", None)
 			if scid:
-				channel_ids.append(int(scid))
-		return channel_ids
+				targets.append(NotifyTarget(guild_id=gid, channel_id=int(scid)))
+		return targets
+
+	def _resolve_campaign_keys(self, campaign: "CampaignRecord") -> set[str]:
+		keys: set[str] = set()
+		for candidate in (campaign.game_slug, campaign.game_name):
+			if not candidate:
+				continue
+			entry = self.game_catalog.get(candidate)
+			if entry is not None:
+				keys.add(entry.key)
+			else:
+				try:
+					normalized = self.game_catalog.normalize(candidate)
+				except Exception:
+					normalized = candidate.casefold()
+				if normalized:
+					keys.add(normalized)
+		return keys
+
+	def _collect_watchers(self, favorites_map: dict[int, set[str]], keys: Iterable[str]) -> list[int]:
+		target = {k for k in keys if k}
+		if not target:
+			return []
+		users = [uid for uid, games in favorites_map.items() if games & target]
+		users.sort()
+		return users
+
+	def _join_mentions(self, user_ids: Iterable[int], *, limit: int) -> str:
+		mentions: list[str] = []
+		total = 0
+		for uid in sorted(dict.fromkeys(int(u) for u in user_ids)):
+			token = f"<@{uid}>"
+			added = len(token) if not mentions else len(token) + 1
+			if total + added > limit:
+				if mentions:
+					mentions.append("…")
+				break
+			mentions.append(token)
+			total += added
+		return " ".join(mentions)
 
 	async def notify(self, diff: DropsDiff) -> None:
 		"""Post embeds for any newly ACTIVE campaigns (with reward collages)."""
-		embeds: list[hikari.Embed] = []
-		attachments_aligned: list[Bytes | None] = []
-		attaches_done = 0
+		if not diff.activated:
+			return
 
-		for c in diff.activated:
-			e = build_campaign_embed(c, title_prefix="Now Active")
+		payloads: List[tuple["CampaignRecord", hikari.Embed, bytes | None, str | None]] = []
+		attachments_budget = self.max_attachments if self.max_attachments > 0 else None
+		attachments_used = 0
 
-			# Attempt to build a collage; cap total attachments if configured
-			png, fname = (None, None)
-			if self.max_attachments <= 0 or attaches_done < self.max_attachments:
-				png, fname = await build_benefits_collage(
-					c,
+		for campaign in diff.activated:
+			embed = build_campaign_embed(campaign, title_prefix="Now Active")
+			png_bytes: bytes | None = None
+			filename: str | None = None
+			if attachments_budget is None or attachments_used < attachments_budget:
+				png_bytes, filename = await build_benefits_collage(
+					campaign,
 					limit=self.icon_limit if self.icon_limit >= 0 else 9,
 					icon_size=(self.icon_size, self.icon_size),
 					columns=self.icon_cols,
 				)
+				if png_bytes and filename:
+					attachments_used += 1
+			if not png_bytes and campaign.benefits and campaign.benefits[0].image_url:
+				embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
+			payloads.append((campaign, embed, png_bytes, filename))
 
-			if png and fname:
-				attachments_aligned.append(Bytes(png, fname))
-				attaches_done += 1
-			else:
-				# Fallback: show the first benefit icon directly if available
-				if c.benefits and c.benefits[0].image_url:
-					e.set_image(c.benefits[0].image_url)  # type: ignore[arg-type]
-				attachments_aligned.append(None)
-
-			embeds.append(e)
-
-		if not embeds:
+		if not payloads:
 			return
 
 		targets = await self._resolve_targets()
 		if not targets:
 			return
 
-		any_attachments = any(a is not None for a in attachments_aligned)
 		for target in targets:
-			if any_attachments:
-				# Send each embed individually to ensure correct attachment mapping
-				for e, a in zip(embeds, attachments_aligned):
-					try:
-						if a is not None:
-							e.set_image(a)
-						await self.app.rest.create_message(target, embeds=[e])
-					except Exception:
-						pass
-					await asyncio.sleep(self.send_delay_ms / 1000)
-			else:
-				# No attachments: send in chunks for efficiency
-				for i in range(0, len(embeds), 10):
-					chunk = embeds[i : i + 10]
-					try:
-						await self.app.rest.create_message(target, embeds=chunk)
-					except Exception:
-						pass
+			favorites_map = self.favorites_store.get_guild_favorites(target.guild_id)
+			for campaign, base_embed, png_bytes, filename in payloads:
+				embed = base_embed.copy()
+				keys = self._resolve_campaign_keys(campaign)
+				watchers = self._collect_watchers(favorites_map, keys)
+				content = None
+				if watchers:
+					mention_text = self._join_mentions(watchers, limit=1800)
+					if mention_text:
+						content = f"Favorites alert: {mention_text}"
+						field_text = self._join_mentions(watchers, limit=1024)
+						if field_text:
+							embed.add_field(name="Favorited By", value=field_text, inline=False)
+				try:
+					if png_bytes and filename:
+						attachment = Bytes(png_bytes, filename)
+						embed.set_image(attachment)
+						await self.app.rest.create_message(
+							target.channel_id,
+							content=content,
+							embeds=[embed],
+						)
+					else:
+						await self.app.rest.create_message(
+							target.channel_id,
+							content=content,
+							embeds=[embed],
+						)
+				except Exception:
+					pass
+				await asyncio.sleep(self.send_delay_ms / 1000)

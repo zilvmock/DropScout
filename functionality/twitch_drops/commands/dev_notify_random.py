@@ -28,7 +28,12 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
                 await ctx.respond("No ACTIVE campaigns available to notify.", ephemeral=True)
                 return
             r = random.choice(active)
-            notifier = DropsNotifier(ctx.client.app, shared.guild_store)
+            notifier = DropsNotifier(
+                ctx.client.app,
+                shared.guild_store,
+                shared.favorites_store,
+                shared.game_catalog,
+            )
             try:
                 await notifier.notify(DropsDiff(activated=[r]))
                 await ctx.respond(
@@ -39,4 +44,3 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
                 await ctx.respond("Failed to trigger notifier.", ephemeral=True)
 
     return "drops_notify_random"
-

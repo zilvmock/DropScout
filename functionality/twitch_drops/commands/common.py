@@ -11,6 +11,7 @@ import hikari
 from hikari.files import Bytes, Resourceish
 
 from ..config import GuildConfigStore
+from ..favorites import FavoritesStore
 from ..game_catalog import GameCatalog
 from ..models import CampaignRecord
 
@@ -27,6 +28,7 @@ class SharedContext:
     SEND_DELAY_MS: int
     FETCH_TTL: int
     game_catalog: GameCatalog
+    favorites_store: FavoritesStore
 
     _cache_data: list[CampaignRecord] = field(default_factory=list)
     _cache_exp: float = 0.0

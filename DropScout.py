@@ -97,6 +97,7 @@ async def _note_started(_: hikari.StartedEvent) -> None:
 		interval_minutes=REFRESH_MINUTES,
 		state_path=os.getenv("TWITCH_STATE_PATH", "data/campaigns_state.json"),
 		guild_store_path=GUILD_STORE_PATH,
+		favorites_store_path=os.getenv("TWITCH_FAVORITES_STORE_PATH", "data/favorites.json"),
 		notify_on_boot=(os.getenv("TWITCH_NOTIFY_ON_BOOT", "false").lower() == "true"),
 	)
 	_monitor.start()
