@@ -7,6 +7,7 @@ objects used by bot commands and notifications.
 """
 
 from .models import CampaignRecord, BenefitRecord
+from .game_catalog import get_game_catalog
 from .twitch_drops import fetch_active_campaigns
 
 
@@ -60,4 +61,8 @@ class DropsFetcher:
 				benefits=benefits,
 			)
 			out.append(rec)
+		try:
+			get_game_catalog().merge_from_campaign_records(out)
+		except Exception:
+			pass
 		return out

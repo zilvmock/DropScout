@@ -12,6 +12,7 @@ from .fetcher import DropsFetcher
 from .differ import DropsDiffer
 from .notifier import DropsNotifier
 from .config import GuildConfigStore
+from .game_catalog import get_game_catalog
 
 
 class DropsMonitor:
@@ -56,6 +57,10 @@ class DropsMonitor:
 	async def _run_loop(self) -> None:
 		"""Main loop: fetch → diff → notify → persist → sleep."""
 		prev = self.store.load()
+		try:
+			get_game_catalog().merge_state_snapshot(prev)
+		except Exception:
+			pass
 		first_run = True
 		differ = DropsDiffer()
 		while True:
