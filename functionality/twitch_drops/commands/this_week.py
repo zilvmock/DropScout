@@ -23,6 +23,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
         async def invoke(self, ctx: lightbulb.Context) -> None:
             try:
                 await ctx.defer()
+                setattr(ctx, "_dropscout_deferred", True)
             except Exception:
                 pass
             recs = await shared.get_campaigns_cached()
@@ -58,4 +59,3 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
             await shared.finalize_interaction(ctx)
 
     return "drops_this_week"
-

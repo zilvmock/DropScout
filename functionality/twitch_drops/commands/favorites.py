@@ -215,9 +215,11 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			app = ctx.client.app
 			try:
 				await ctx.defer(ephemeral=True)
-				deferred = True
 			except Exception:
 				deferred = False
+			else:
+				deferred = True
+				setattr(ctx, "_dropscout_deferred", True)
 
 			key = (self.game or "").strip()
 			if not key:
@@ -282,6 +284,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				return
 			try:
 				await ctx.defer()
+				setattr(ctx, "_dropscout_deferred", True)
 			except Exception:
 				pass
 
@@ -400,9 +403,11 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			app = ctx.client.app
 			try:
 				await ctx.defer(ephemeral=True)
-				deferred = True
 			except Exception:
 				deferred = False
+			else:
+				deferred = True
+				setattr(ctx, "_dropscout_deferred", True)
 
 			key = (self.game or "").strip()
 			if not key:

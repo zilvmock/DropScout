@@ -32,9 +32,11 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				return
 			try:
 				await ctx.defer(ephemeral=True)
-				deferred = True
 			except Exception:
 				deferred = False
+			else:
+				deferred = True
+				setattr(ctx, "_dropscout_deferred", True)
 			try:
 				recs = await shared.get_campaigns_cached()
 			except Exception:
