@@ -12,6 +12,7 @@ from typing import List
 import lightbulb
 
 from ..config import GuildConfigStore
+from ..game_catalog import get_game_catalog
 from .common import SharedContext
 
 
@@ -47,6 +48,7 @@ def register_commands(client: lightbulb.Client) -> List[str]:
         MAX_ATTACH_PER_CMD=MAX_ATTACH_PER_CMD,
         SEND_DELAY_MS=SEND_DELAY_MS,
         FETCH_TTL=FETCH_TTL,
+        game_catalog=get_game_catalog(),
     )
 
     names: List[str] = []

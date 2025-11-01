@@ -11,6 +11,7 @@ import hikari
 from hikari.files import Bytes, Resourceish
 
 from ..config import GuildConfigStore
+from ..game_catalog import GameCatalog
 from ..models import CampaignRecord
 
 
@@ -25,6 +26,7 @@ class SharedContext:
     MAX_ATTACH_PER_CMD: int
     SEND_DELAY_MS: int
     FETCH_TTL: int
+    game_catalog: GameCatalog
 
     _cache_data: list[CampaignRecord] = field(default_factory=list)
     _cache_exp: float = 0.0
@@ -39,6 +41,10 @@ class SharedContext:
         data = await fetcher.fetch_condensed()
         self._cache_data = data
         self._cache_exp = now_ts + self.FETCH_TTL
+        try:
+            self.game_catalog.merge_from_campaign_records(data)
+        except Exception:
+            pass
         return data
 
     def _get_async(self, ctx: Any, name: str) -> Optional[Callable[..., Awaitable[Any]]]:
