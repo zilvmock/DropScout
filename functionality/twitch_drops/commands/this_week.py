@@ -9,7 +9,7 @@ import lightbulb
 
 from ..embeds import build_campaign_embed
 from ..images import build_benefits_collage
-from .common import SharedContext
+from .common import SharedContext, mark_deferred
 
 
 def register(client: lightbulb.Client, shared: SharedContext) -> str:
@@ -23,9 +23,10 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
         async def invoke(self, ctx: lightbulb.Context) -> None:
             try:
                 await ctx.defer()
-                setattr(ctx, "_dropscout_deferred", True)
             except Exception:
                 pass
+            else:
+                mark_deferred(ctx)
             recs = await shared.get_campaigns_cached()
             now = datetime.now(timezone.utc)
             weekday = now.weekday()  # Monday=0

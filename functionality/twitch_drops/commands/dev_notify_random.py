@@ -5,7 +5,7 @@ import lightbulb
 
 from ..differ import DropsDiff
 from ..notifier import DropsNotifier
-from .common import SharedContext
+from .common import SharedContext, mark_deferred
 
 
 
@@ -36,7 +36,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				deferred = False
 			else:
 				deferred = True
-				setattr(ctx, "_dropscout_deferred", True)
+				mark_deferred(ctx)
 			try:
 				recs = await shared.get_campaigns_cached()
 			except Exception:

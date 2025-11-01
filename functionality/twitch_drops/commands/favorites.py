@@ -15,7 +15,7 @@ from ..models import CampaignRecord
 from ..embeds import build_campaign_embed
 from ..images import build_benefits_collage
 from ..notifier import DropsNotifier
-from .common import SharedContext
+from .common import SharedContext, mark_deferred
 
 CUSTOM_ID_PREFIX = "drops:fav"
 REMOVE_SELECT_ID = f"{CUSTOM_ID_PREFIX}:remove"
@@ -219,7 +219,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				deferred = False
 			else:
 				deferred = True
-				setattr(ctx, "_dropscout_deferred", True)
+				mark_deferred(ctx)
 
 			key = (self.game or "").strip()
 			if not key:
@@ -240,7 +240,10 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			else:
 				message = f"**{entry.name}** is already in your favorites."
 
-			active = await _find_active_campaigns(shared, entry)
+			try:
+				active = await asyncio.wait_for(_find_active_campaigns(shared, entry), timeout=5)
+			except asyncio.TimeoutError:
+				active = []
 			embed, components = _build_overview(app, shared, guild_id, user_id)
 			if active:
 				lines = []
@@ -284,9 +287,10 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				return
 			try:
 				await ctx.defer()
-				setattr(ctx, "_dropscout_deferred", True)
 			except Exception:
 				pass
+			else:
+				mark_deferred(ctx)
 
 			favorites = shared.favorites_store.get_user_favorites(guild_id, user_id)
 			if not favorites:
@@ -407,7 +411,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				deferred = False
 			else:
 				deferred = True
-				setattr(ctx, "_dropscout_deferred", True)
+				mark_deferred(ctx)
 
 			key = (self.game or "").strip()
 			if not key:

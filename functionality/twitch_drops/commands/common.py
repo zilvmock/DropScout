@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional, cast
 
+from contextlib import suppress
+
 import asyncio
 import hikari
 from hikari.files import Bytes, Resourceish
@@ -166,3 +168,9 @@ class SharedContext:
         for i in range(0, len(embeds), 10):
             chunk = embeds[i : i + 10]
             await ctx.respond(embeds=chunk)
+
+
+def mark_deferred(ctx: Any) -> None:
+    """Best-effort marker so finalize_interaction knows the context deferred."""
+    with suppress(AttributeError):
+        setattr(ctx, "_dropscout_deferred", True)
