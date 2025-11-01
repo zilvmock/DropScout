@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional, cast
 
+from contextlib import suppress
+
 import asyncio
 import hikari
 from hikari.files import Bytes, Resourceish
