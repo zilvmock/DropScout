@@ -62,15 +62,11 @@ def register_commands(client: lightbulb.Client) -> List[str]:
     from .help import register as reg_help
     from .set_channel import register as reg_set_channel
     from .channel import register as reg_channel
-    from .active import register as reg_active
-    from .this_week import register as reg_this_week
     from .search_game import register as reg_search_game
     from .favorites import register as reg_favorites
 
     names.append(reg_hello(client, shared))
     names.append(reg_help(client, shared))
-    names.append(reg_active(client, shared))
-    names.append(reg_this_week(client, shared))
     names.append(reg_set_channel(client, shared))
     names.append(reg_channel(client, shared))
     names.append(reg_search_game(client, shared))

@@ -171,6 +171,8 @@ class SharedContext:
 
 
 def mark_deferred(ctx: Any) -> None:
-    """Best-effort marker so finalize_interaction knows the context deferred."""
-    with suppress(AttributeError):
+    """Mark a context as deferred so finalize_interaction knows to clean up."""
+    try:
         setattr(ctx, "_dropscout_deferred", True)
+    except Exception:
+        pass

@@ -25,8 +25,6 @@ When the bot is added to a server, you can call the following commands.
 ### [📜](#commands) Commands
 - `/hello` — Quick health check.
 - `/help` — What DropScout does and the available commands.
-- `/drops_active` — List ACTIVE campaigns (with reward collages).
-- `/drops_this_week` — ACTIVE campaigns ending before next Monday (UTC).
 - `/drops_search_game` `<game>` — Pick a game from autocomplete suggestions to see its active Drops.
 - `/drops_set_channel` `[channel]` — Configure the notifications channel for this server (defaults to the current channel).
 - `/drops_channel` — Show the configured notifications channel (or the default).

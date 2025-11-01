@@ -22,16 +22,6 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
             color = 0x235876
             e = hikari.Embed(title="DropScout Help", description=desc, color=color)
             e.add_field(
-                name="/drops_active",
-                value="List currently ACTIVE campaigns (with reward collages).",
-                inline=False,
-            )
-            e.add_field(
-                name="/drops_this_week",
-                value="List ACTIVE campaigns ending before next Monday (UTC).",
-                inline=False,
-            )
-            e.add_field(
                 name="/drops_search_game <query>",
                 value="Find the best-matching game with active Drops and show its campaign.",
                 inline=False,
@@ -50,4 +40,3 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
             await ctx.respond(embeds=[e], ephemeral=True)
 
     return "help"
-

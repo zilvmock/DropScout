@@ -1,25 +1,43 @@
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
-
-import asyncio
+from typing import List, Optional, Tuple, Sequence
 
 import hikari
 import lightbulb
 from lightbulb import context as lb_context
 from lightbulb.commands import options as opt
-from hikari.files import Bytes
 
 from ..game_catalog import GameEntry
 from ..models import CampaignRecord
 from ..embeds import build_campaign_embed
-from ..images import build_benefits_collage
-from ..notifier import DropsNotifier
 from .common import SharedContext, mark_deferred
 
 CUSTOM_ID_PREFIX = "drops:fav"
 REMOVE_SELECT_ID = f"{CUSTOM_ID_PREFIX}:remove"
 REFRESH_BUTTON_ID = f"{CUSTOM_ID_PREFIX}:refresh"
+CHECK_GOTO_ID = f"{CUSTOM_ID_PREFIX}:check"
+
+
+class _LiteralComponent(hikari.api.special_endpoints.ComponentBuilder):
+	"""Minimal ComponentBuilder implementation for static payloads."""
+
+	__slots__ = ("_payload", "_type", "_id")
+
+	def __init__(self, payload: dict[str, object], component_type: hikari.ComponentType) -> None:
+		self._payload = payload
+		self._type = component_type
+		self._id = None
+
+	@property
+	def type(self) -> hikari.ComponentType:
+		return self._type
+
+	@property
+	def id(self) -> int | None:
+		return self._id
+
+	def build(self) -> tuple[dict[str, object], Sequence[hikari.files.Resourceish]]:
+		return self._payload, ()
 
 
 def _build_overview(
@@ -94,7 +112,7 @@ async def _send_ephemeral_response(
 	*,
 	content: Optional[str] = None,
 	embeds: Optional[List[hikari.Embed]] = None,
-	components: Optional[List[hikari.api.special_endpoints.ComponentBuilder]] = None,
+	components: Optional[Sequence[hikari.api.special_endpoints.ComponentBuilder]] = None,
 ) -> None:
 	payload: dict[str, object] = {}
 	if content is not None:
@@ -113,6 +131,82 @@ async def _send_ephemeral_response(
 			pass
 	payload["flags"] = hikari.MessageFlag.EPHEMERAL
 	await ctx.respond(**payload)
+
+
+def _build_favorite_pages(
+	shared: SharedContext,
+	favorites: list[str],
+	campaigns: list[CampaignRecord],
+) -> list[tuple[GameEntry, list[CampaignRecord]]]:
+	results: list[tuple[GameEntry, list[CampaignRecord]]] = []
+	for key in favorites:
+		entry = shared.game_catalog.get(key)
+		if entry is None:
+			continue
+		matches: list[CampaignRecord] = []
+		for campaign in campaigns:
+			if campaign.status != "ACTIVE":
+				continue
+			try:
+				if shared.game_catalog.matches_campaign(entry, campaign):
+					matches.append(campaign)
+			except Exception:
+				continue
+		matches.sort(key=lambda rec: rec.ends_ts or (10**10))
+		results.append((entry, matches))
+	return results
+
+
+def _build_check_page_payload(
+	app: hikari.RESTAware,
+	user_id: int,
+	pages: list[tuple[GameEntry, list[CampaignRecord]]],
+	index: int,
+) -> tuple[str, list[hikari.Embed], list[hikari.api.special_endpoints.ComponentBuilder]]:
+	total = len(pages)
+	index = max(0, min(index, total - 1))
+	entry, campaigns = pages[index]
+	content = f"Active Drops for **{entry.name}** ({index + 1}/{total})"
+	embeds: list[hikari.Embed] = []
+	for campaign in campaigns[:10]:
+		embed = build_campaign_embed(campaign, title_prefix="Favorite Active")
+		if campaign.benefits and campaign.benefits[0].image_url:
+			embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
+		embeds.append(embed)
+	if not embeds:
+		embed = hikari.Embed(title=entry.name, description="No active campaigns right now.")
+		embeds.append(embed)
+	else:
+		remaining = len(campaigns) - len(embeds)
+		if remaining > 0:
+			embeds[-1].set_footer(f"+{remaining} more campaign(s) not shown in this view.")
+
+	components: list[hikari.api.special_endpoints.ComponentBuilder] = []
+	if total > 1:
+		prev_target = max(index - 1, 0)
+		next_target = min(index + 1, total - 1)
+		row_payload: dict[str, object] = {
+			"type": int(hikari.ComponentType.ACTION_ROW),
+			"components": [
+				{
+					"type": int(hikari.ComponentType.BUTTON),
+					"style": int(hikari.ButtonStyle.SECONDARY),
+					"custom_id": f"{CHECK_GOTO_ID}:{user_id}:{prev_target}",
+					"label": "Previous",
+					"disabled": index == 0,
+				},
+				{
+					"type": int(hikari.ComponentType.BUTTON),
+					"style": int(hikari.ButtonStyle.SECONDARY),
+					"custom_id": f"{CHECK_GOTO_ID}:{user_id}:{next_target}",
+					"label": "Next",
+					"disabled": index >= total - 1,
+				},
+			],
+		}
+		components.append(_LiteralComponent(row_payload, hikari.ComponentType.ACTION_ROW))
+
+	return content, embeds, components
 
 
 def register(client: lightbulb.Client, shared: SharedContext) -> str:
@@ -288,8 +382,9 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			try:
 				await ctx.defer(ephemeral=True)
 			except Exception:
-				pass
+				deferred = False
 			else:
+				deferred = True
 				mark_deferred(ctx)
 
 			favorites = shared.favorites_store.get_user_favorites(guild_id, user_id)
@@ -297,84 +392,25 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				await shared.finalize_interaction(ctx, message="You have no favorite games yet.")
 				return
 
-			recs = await shared.get_campaigns_cached()
-			entry_cache: dict[str, GameEntry | None] = {}
-			matches: list[CampaignRecord] = []
-			for rec in recs:
-				if rec.status != "ACTIVE":
-					continue
-				for fav_key in favorites:
-					entry = entry_cache.get(fav_key)
-					if entry is None:
-						entry = shared.game_catalog.get(fav_key)
-						entry_cache[fav_key] = entry
-					if entry and shared.game_catalog.matches_campaign(entry, rec):
-						matches.append(rec)
-						break
-			if not matches:
+			try:
+				recs = await shared.get_campaigns_cached()
+			except Exception:
+				await shared.finalize_interaction(ctx, message="Failed to load campaigns.")
+				return
+
+			pages = _build_favorite_pages(shared, favorites, recs)
+			if not pages:
 				await shared.finalize_interaction(ctx, message="No active campaigns for your favorites right now.")
 				return
 
-			channel_id = shared.guild_store.get_channel_id(guild_id)
-			if channel_id is None:
-				try:
-					channel_id = int(ctx.channel_id)
-					shared.guild_store.set_channel_id(guild_id, channel_id)
-				except Exception:
-					channel_id = int(ctx.channel_id)
-
-			notifier = DropsNotifier(
-				ctx.client.app,
-				shared.guild_store,
-				shared.favorites_store,
-				shared.game_catalog,
+			content, embeds, components = _build_check_page_payload(ctx.client.app, user_id, pages, 0)
+			await _send_ephemeral_response(
+				ctx,
+				deferred,
+				content=content,
+				embeds=embeds,
+				components=components,
 			)
-			favorites_map = shared.favorites_store.get_guild_favorites(guild_id)
-
-			attachments_budget = shared.MAX_ATTACH_PER_CMD if shared.MAX_ATTACH_PER_CMD > 0 else None
-			attachments_used = 0
-			sent = 0
-			for campaign in matches:
-				embed = build_campaign_embed(campaign, title_prefix="Now Active")
-				png_bytes: bytes | None = None
-				filename: str | None = None
-				if attachments_budget is None or attachments_used < attachments_budget:
-					png_bytes, filename = await build_benefits_collage(
-						campaign,
-						limit=shared.ICON_LIMIT if shared.ICON_LIMIT >= 0 else 9,
-						icon_size=(shared.ICON_SIZE, shared.ICON_SIZE),
-						columns=shared.ICON_COLUMNS,
-					)
-					if png_bytes and filename:
-						attachments_used += 1
-				if not png_bytes and campaign.benefits and campaign.benefits[0].image_url:
-					embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
-				attachment = None
-				if png_bytes and filename:
-					attachment = Bytes(png_bytes, filename)
-					embed.set_image(attachment)
-
-				keys = notifier._resolve_campaign_keys(campaign)
-				watcher_ids = set(notifier._collect_watchers(favorites_map, keys))
-				watcher_ids.add(user_id)
-				mention_text = notifier._join_mentions(watcher_ids, limit=1800)
-
-				try:
-					await ctx.client.app.rest.create_message(
-						channel_id,
-						content=mention_text or f"<@{user_id}>",
-						embeds=[embed],
-					)
-					sent += 1
-				except Exception:
-					continue
-				await asyncio.sleep(shared.SEND_DELAY_MS / 1000)
-
-			if sent == 0:
-				await shared.finalize_interaction(ctx, message="Failed to send favorites alerts.")
-				return
-
-			await shared.finalize_interaction(ctx)
 
 	@group.register
 	class DropsFavoritesRemove(
@@ -446,7 +482,13 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			interaction = event.interaction
 			if not isinstance(interaction, hikari.ComponentInteraction):
 				return
-			if interaction.custom_id not in {REMOVE_SELECT_ID, REFRESH_BUTTON_ID}:
+			custom_id = interaction.custom_id
+			if custom_id is None:
+				return
+			if (
+				custom_id not in {REMOVE_SELECT_ID, REFRESH_BUTTON_ID}
+				and not custom_id.startswith(f"{CHECK_GOTO_ID}:")
+			):
 				return
 			guild_id = getattr(interaction, "guild_id", None)
 			user = getattr(interaction, "user", None)
@@ -467,7 +509,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 
 			app_local = interaction.app
 
-			if interaction.custom_id == REMOVE_SELECT_ID:
+			if custom_id == REMOVE_SELECT_ID:
 				values = interaction.values or []
 				removed = shared.favorites_store.remove_many(gid, uid, values)
 				embed, components = _build_overview(app_local, shared, gid, uid)
@@ -483,12 +525,70 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 					pass
 				return
 
-			if interaction.custom_id == REFRESH_BUTTON_ID:
+			if custom_id == REFRESH_BUTTON_ID:
 				embed, components = _build_overview(app_local, shared, gid, uid)
 				try:
 					await interaction.create_initial_response(
 						hikari.ResponseType.MESSAGE_UPDATE,
 						embeds=[embed],
+						components=components,
+					)
+				except Exception:
+					pass
+				return
+
+			if custom_id.startswith(f"{CHECK_GOTO_ID}:"):
+				parts = custom_id.split(":")
+				if len(parts) != 5:
+					return
+				try:
+					target_uid = int(parts[3])
+					target_index = int(parts[4])
+				except (TypeError, ValueError):
+					return
+				if target_uid != uid:
+					try:
+						await interaction.create_initial_response(
+							hikari.ResponseType.MESSAGE_CREATE,
+							content="You cannot control another user's favorites pagination.",
+							flags=hikari.MessageFlag.EPHEMERAL,
+						)
+					except Exception:
+						pass
+					return
+				try:
+					recs = await shared.get_campaigns_cached()
+				except Exception:
+					try:
+						await interaction.create_initial_response(
+							hikari.ResponseType.MESSAGE_UPDATE,
+							content="Failed to refresh favorites.",
+							embeds=[],
+							components=[],
+						)
+					except Exception:
+						pass
+					return
+				favorites = shared.favorites_store.get_user_favorites(gid, uid)
+				pages = _build_favorite_pages(shared, favorites, recs)
+				if not pages:
+					try:
+						await interaction.create_initial_response(
+							hikari.ResponseType.MESSAGE_UPDATE,
+							content="No active campaigns for your favorites right now.",
+							embeds=[],
+							components=[],
+						)
+					except Exception:
+						pass
+					return
+				target_index = max(0, min(target_index, len(pages) - 1))
+				content, embeds, components = _build_check_page_payload(app_local, uid, pages, target_index)
+				try:
+					await interaction.create_initial_response(
+						hikari.ResponseType.MESSAGE_UPDATE,
+						content=content,
+						embeds=embeds,
 						components=components,
 					)
 				except Exception:

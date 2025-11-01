@@ -12,8 +12,6 @@ def test_register_commands_adds_expected():
 	expected = {
 		"hello",
 		"help",
-		"drops_active",
-		"drops_this_week",
 		"drops_set_channel",
 		"drops_channel",
 		"drops_search_game",
