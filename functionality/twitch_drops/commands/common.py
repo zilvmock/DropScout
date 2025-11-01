@@ -11,6 +11,8 @@ import hikari
 from hikari.files import Bytes, Resourceish
 
 from ..config import GuildConfigStore
+from ..favorites import FavoritesStore
+from ..game_catalog import GameCatalog
 from ..models import CampaignRecord
 
 
@@ -25,6 +27,8 @@ class SharedContext:
     MAX_ATTACH_PER_CMD: int
     SEND_DELAY_MS: int
     FETCH_TTL: int
+    game_catalog: GameCatalog
+    favorites_store: FavoritesStore
 
     _cache_data: list[CampaignRecord] = field(default_factory=list)
     _cache_exp: float = 0.0
@@ -39,6 +43,10 @@ class SharedContext:
         data = await fetcher.fetch_condensed()
         self._cache_data = data
         self._cache_exp = now_ts + self.FETCH_TTL
+        try:
+            self.game_catalog.merge_from_campaign_records(data)
+        except Exception:
+            pass
         return data
 
     def _get_async(self, ctx: Any, name: str) -> Optional[Callable[..., Awaitable[Any]]]:
@@ -47,39 +55,84 @@ class SharedContext:
             return None
         return cast(Callable[..., Awaitable[Any]], fn)
 
+    def _was_deferred(self, ctx: Any) -> bool:
+        """Best-effort detection that an interaction was previously deferred."""
+        for attr in ("_dropscout_deferred", "deferred", "_deferred"):
+            val = getattr(ctx, attr, None)
+            if isinstance(val, bool):
+                if val:
+                    return True
+            elif val is not None and not callable(val):
+                try:
+                    if bool(val):
+                        return True
+                except Exception:
+                    continue
+        for attr in ("is_deferred",):
+            val = getattr(ctx, attr, None)
+            if callable(val):
+                try:
+                    result = val()
+                except Exception:
+                    continue
+                else:
+                    if isinstance(result, bool) and result:
+                        return True
+            elif isinstance(val, bool) and val:
+                return True
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is None:
+            return False
+        for attr in ("is_deferred", "has_responded"):
+            val = getattr(interaction, attr, None)
+            if callable(val):
+                try:
+                    result = val()
+                except Exception:
+                    continue
+                else:
+                    if isinstance(result, bool) and result:
+                        return True
+            elif isinstance(val, bool) and val:
+                return True
+        return False
+
     async def finalize_interaction(self, ctx: Any, *, message: Optional[str] = None) -> None:
         """Clear or update the deferred 'thinking…' placeholder if present."""
-        # Try delete last/initial response first to avoid clutter
-        fn = self._get_async(ctx, "delete_last_response")
-        if fn is not None:
-            try:
-                await fn()
-                return
-            except Exception:
-                pass
-        fn = self._get_async(ctx, "delete_initial_response")
-        if fn is not None:
-            try:
-                await fn()
-                return
-            except Exception:
-                pass
-        # Fall back to editing the placeholder
         content = message if (message is not None and message != "") else "Done."
-        fn = self._get_async(ctx, "edit_last_response")
-        if fn is not None:
+        notify = bool(message not in (None, "")) or self._was_deferred(ctx)
+
+        async def _run(name: str, **kwargs: Any) -> bool:
+            fn = self._get_async(ctx, name)
+            if fn is None:
+                return False
             try:
-                await fn(content=content)
+                await fn(**kwargs)
+            except Exception:
+                return False
+            return True
+
+        if notify:
+            if await _run("edit_last_response", content=content):
                 return
+            if await _run("edit_initial_response", content=content):
+                return
+            await _run("delete_last_response")
+            await _run("delete_initial_response")
+            try:
+                await ctx.respond(content, ephemeral=True)
             except Exception:
                 pass
-        fn = self._get_async(ctx, "edit_initial_response")
-        if fn is not None:
-            try:
-                await fn(content=content)
-                return
-            except Exception:
-                pass
+            return
+
+        if await _run("delete_last_response"):
+            return
+        if await _run("delete_initial_response"):
+            return
+        if await _run("edit_last_response", content=content):
+            return
+        if await _run("edit_initial_response", content=content):
+            return
         # Absolute last resort: ephemeral follow-up note
         try:
             await ctx.respond(content, ephemeral=True)

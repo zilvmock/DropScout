@@ -1,92 +1,64 @@
 from __future__ import annotations
 
-import difflib
-
-import hikari
-from hikari.files import Bytes
 import lightbulb
+from lightbulb import context as lb_context
 from lightbulb.commands import options as opt
+from hikari.files import Bytes
 
 from ..embeds import build_campaign_embed
 from ..images import build_benefits_collage
-from ..models import CampaignRecord
 from .common import SharedContext
 
 
 def register(client: lightbulb.Client, shared: SharedContext) -> str:
+    async def _autocomplete(ctx: lb_context.AutocompleteContext[str]) -> None:
+        if not shared.game_catalog.is_ready():
+            await ctx.respond([])
+            return
+        prefix = str(ctx.focused.value or "").strip()
+        try:
+            matches = shared.game_catalog.search(prefix, limit=25)
+        except Exception:
+            matches = []
+        await ctx.respond([(entry.name, entry.key) for entry in matches])
+
     @client.register
     class DropsSearchGame(
         lightbulb.SlashCommand,
         name="drops_search_game",
-        description="Search active campaigns by game name and show the best match",
+        description="Browse active Twitch Drops campaigns by selecting a game",
     ):
-        query: str = opt.string("query", "Game name to search for")
+        game: str = opt.string(
+            "game",
+            "Choose a game to view active drops",
+            autocomplete=_autocomplete,
+        )
 
         @lightbulb.invoke
         async def invoke(self, ctx: lightbulb.Context) -> None:
-            q = (self.query or "").strip()
-            if not q:
-                await ctx.respond("Provide a game name, e.g. 'Call of Duty'.", ephemeral=True)
+            key = (self.game or "").strip()
+            entry = shared.game_catalog.get(key)
+            if entry is None:
+                await ctx.respond(
+                    "Select a game from the provided suggestions to run this search.",
+                    ephemeral=True,
+                )
                 return
             try:
                 await ctx.defer()
+                setattr(ctx, "_dropscout_deferred", True)
             except Exception:
                 pass
             recs = await shared.get_campaigns_cached()
-
-            def norm(s: str) -> str:
-                import re as _re
-
-                s = s.casefold().strip()
-                s = _re.sub(r"[\s_]+", " ", s)
-                return s
-
-            key_to_items: dict[str, list[CampaignRecord]] = {}
-            keys: list[str] = []
-            for r in recs:
-                game = (r.game_name or "").strip()
-                if not game:
-                    continue
-                gk = norm(game)
-                key_to_items.setdefault(gk, []).append(r)
-                if gk not in keys:
-                    keys.append(gk)
-
-            nq = norm(q)
-            best_rec: CampaignRecord | None = None
-            ambiguous = False
-
-            if nq in key_to_items:
-                best_rec = key_to_items[nq][0]
-            else:
-                try:
-                    from rapidfuzz import process, fuzz  # type: ignore
-
-                    matches = process.extract(nq, keys, scorer=fuzz.token_set_ratio, limit=5)
-                    if matches:
-                        best_key, best_score, _ = matches[0]
-                        if best_score >= 45:
-                            best_rec = key_to_items[best_key][0]
-                        strong = [m for m in matches if m[1] >= max(best_score - 5, 70)]
-                        ambiguous = len(strong) > 1 and nq != best_key
-                except Exception:
-                    close = difflib.get_close_matches(nq, keys, n=5, cutoff=0.4)
-                    if close:
-                        best_key = close[0]
-                        best_rec = key_to_items[best_key][0]
-                        ambiguous = len(close) > 1 and nq != best_key
-                    else:
-                        contains = [k for k in keys if nq in k]
-                        if contains:
-                            best_key = contains[0]
-                            best_rec = key_to_items[best_key][0]
-                            ambiguous = len(contains) > 1 and nq != best_key
-
-            if not best_rec:
-                await ctx.respond("No matching games with drops found.")
+            matches = [
+                r for r in recs if shared.game_catalog.matches_campaign(entry, r)
+            ]
+            if not matches:
+                await ctx.respond(f"No active Twitch Drops campaigns found for **{entry.name}**.")
                 return
-            r = best_rec
-            e = build_campaign_embed(r, title_prefix="Best Match")
+
+            r = matches[0]
+            e = build_campaign_embed(r, title_prefix="Selected Game")
             png, fname = await build_benefits_collage(
                 r,
                 limit=shared.ICON_LIMIT if shared.ICON_LIMIT >= 0 else 9,
@@ -97,9 +69,8 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
                 e.set_image(Bytes(png, fname))
             elif r.benefits and r.benefits[0].image_url:
                 e.set_image(r.benefits[0].image_url)  # type: ignore[arg-type]
-            hint = "Did you mean this game? If not, please be more specific." if ambiguous else None
-            if hint:
-                e.set_footer(hint)
+            if len(matches) > 1:
+                e.set_footer("Multiple campaigns found; showing the first match.")
             await ctx.respond(embeds=[e])
             await shared.finalize_interaction(ctx)
 

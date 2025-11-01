@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import cast
+from typing import Optional, cast
 
 import pytest
 
@@ -30,6 +30,9 @@ class FakeCtx:
         self.responses: list[dict] = []
         self.deleted_initial = False
         self.deleted_last = False
+        self.edited_initial = False
+        self.edited_last = False
+        self.last_edit_content: Optional[str] = None
 
     async def defer(self, *_, **__):
         self.deferred = True
@@ -44,6 +47,14 @@ class FakeCtx:
 
     async def delete_initial_response(self):
         self.deleted_initial = True
+
+    async def edit_last_response(self, *, content: Optional[str] = None, **kwargs):
+        self.edited_last = True
+        self.last_edit_content = content
+
+    async def edit_initial_response(self, *, content: Optional[str] = None, **kwargs):
+        self.edited_initial = True
+        self.last_edit_content = content
 
 
 def _active_week_campaign() -> CampaignRecord:
@@ -100,5 +111,8 @@ async def test_drops_this_week_clears_deferred_placeholder(monkeypatch):
     assert ctx.responses, "Command did not produce any response output"
 
     # And the deferred placeholder should be finalized (deleted or edited).
-    # The helper prefers delete_last_response first.
-    assert ctx.deleted_last or ctx.deleted_initial, "Deferred placeholder was not finalized"
+    assert (
+        ctx.deleted_last or ctx.deleted_initial or ctx.edited_last or ctx.edited_initial
+    ), "Deferred placeholder was not finalized"
+    if ctx.edited_last or ctx.edited_initial:
+        assert ctx.last_edit_content == "Done."

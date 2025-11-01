@@ -12,6 +12,8 @@ from typing import List
 import lightbulb
 
 from ..config import GuildConfigStore
+from ..favorites import FavoritesStore
+from ..game_catalog import get_game_catalog
 from .common import SharedContext
 
 
@@ -31,6 +33,8 @@ def register_commands(client: lightbulb.Client) -> List[str]:
     """Register all DropScout commands on a Lightbulb client and return names."""
     GUILD_STORE_PATH = os.getenv("TWITCH_GUILD_STORE_PATH", "data/guild_config.json")
     guild_store = GuildConfigStore(GUILD_STORE_PATH)
+    FAVORITES_STORE_PATH = os.getenv("TWITCH_FAVORITES_STORE_PATH", "data/favorites.json")
+    favorites_store = FavoritesStore(FAVORITES_STORE_PATH)
 
     ICON_LIMIT = int(os.getenv("DROPS_ICON_LIMIT", "9") or 9)
     ICON_SIZE = int(os.getenv("DROPS_ICON_SIZE", "96") or 96)
@@ -47,6 +51,8 @@ def register_commands(client: lightbulb.Client) -> List[str]:
         MAX_ATTACH_PER_CMD=MAX_ATTACH_PER_CMD,
         SEND_DELAY_MS=SEND_DELAY_MS,
         FETCH_TTL=FETCH_TTL,
+        game_catalog=get_game_catalog(),
+        favorites_store=favorites_store,
     )
 
     names: List[str] = []
@@ -59,6 +65,7 @@ def register_commands(client: lightbulb.Client) -> List[str]:
     from .active import register as reg_active
     from .this_week import register as reg_this_week
     from .search_game import register as reg_search_game
+    from .favorites import register as reg_favorites
 
     names.append(reg_hello(client, shared))
     names.append(reg_help(client, shared))
@@ -67,6 +74,7 @@ def register_commands(client: lightbulb.Client) -> List[str]:
     names.append(reg_set_channel(client, shared))
     names.append(reg_channel(client, shared))
     names.append(reg_search_game(client, shared))
+    names.append(reg_favorites(client, shared))
 
     # Dev-only commands
     if not _is_production():

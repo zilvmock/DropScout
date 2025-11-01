@@ -32,3 +32,9 @@ def test_differ_activated_when_newly_seen():
     ids = [c.id for c in d.activated]
     assert "c3" in ids
 
+
+def test_differ_skips_still_active():
+    prev = {"c1": {"status": "ACTIVE"}}
+    curr = [rec("c1", "ACTIVE")]
+    d = DropsDiffer().diff(prev, curr)
+    assert d.activated == []
