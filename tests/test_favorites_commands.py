@@ -220,3 +220,66 @@ async def test_check_sends_now_active_messages(monkeypatch, favorites_group):
 	assert "<@42>" in (content or "")
 	assert embeds and embeds[0].title
 	assert finalized[-1] is None
+
+
+@pytest.mark.asyncio
+async def test_add_handles_slot_based_context(monkeypatch, favorites_group):
+	group, shared = favorites_group
+	add_cmd = group.subcommands["add"]
+	cmd_instance = object.__new__(add_cmd)
+
+	shared.game_catalog.merge_games(
+		[
+			GameEntry(key="valorant", name="Valorant", weight=500),
+		]
+	)
+	shared.game_catalog.set_ready(True)
+
+	async def fake_active(shared_ctx, entry):
+		return []
+
+	monkeypatch.setattr(favorites_mod, "_find_active_campaigns", fake_active)
+
+	class RestStub:
+		def build_message_action_row(self):
+			raise RuntimeError("no UI builders in tests")
+
+	class AppStub:
+		def __init__(self) -> None:
+			self.rest = RestStub()
+
+	class ClientStub:
+		def __init__(self) -> None:
+			self.app = AppStub()
+
+	class SlotContext:
+		__slots__ = ("guild_id", "user", "client", "_edits", "_responses", "_defer_args", "_defer_kwargs")
+
+		def __init__(self) -> None:
+			self.guild_id = 321
+			self.user = type("User", (), {"id": 654})()
+			self.client = ClientStub()
+			self._edits: list[dict[str, object]] = []
+			self._responses: list[tuple[tuple[object, ...], dict[str, object]]] = []
+			self._defer_args: tuple[object, ...] = ()
+			self._defer_kwargs: dict[str, object] = {}
+
+		async def defer(self, *args, **kwargs):
+			self._defer_args = args
+			self._defer_kwargs = kwargs
+
+		async def edit_initial_response(self, **payload):
+			self._edits.append(payload)
+
+		async def respond(self, *args, **kwargs):
+			self._responses.append((args, kwargs))
+
+	cmd_instance.game = "valorant"
+	ctx = SlotContext()
+
+	bound_invoke = add_cmd.invoke.__get__(cmd_instance, add_cmd)
+	await bound_invoke(ctx)
+
+	assert shared.favorites_store.get_user_favorites(321, 654) == ["valorant"]
+	assert not hasattr(ctx, "_dropscout_deferred"), "marker should not be set on slot-based context"
+	assert ctx._edits or ctx._responses, "command should send a response"
