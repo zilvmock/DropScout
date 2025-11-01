@@ -9,4 +9,14 @@ def test_register_commands_adds_expected():
 	bot = hikari.GatewayBot(token="X", intents=hikari.Intents.ALL_UNPRIVILEGED)
 	client = lightbulb.client_from_app(bot)
 	names = set(register_commands(client))
-	assert {"hello", "help", "drops_active", "drops_this_week", "drops_set_channel", "drops_channel", "drops_search_game"}.issubset(names)
+	expected = {
+		"hello",
+		"help",
+		"drops_active",
+		"drops_this_week",
+		"drops_set_channel",
+		"drops_channel",
+		"drops_search_game",
+		"drops_favorites",
+	}
+	assert expected.issubset(names)

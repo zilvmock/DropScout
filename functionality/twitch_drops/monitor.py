@@ -12,6 +12,7 @@ from .fetcher import DropsFetcher
 from .differ import DropsDiffer
 from .notifier import DropsNotifier
 from .config import GuildConfigStore
+from .favorites import FavoritesStore
 from .game_catalog import get_game_catalog
 
 
@@ -25,6 +26,7 @@ class DropsMonitor:
 		interval_minutes: int = 30,
 		state_path: str = "data/campaigns_state.json",
 		guild_store_path: str = "data/guild_config.json",
+		favorites_store_path: str = "data/favorites.json",
 		notify_on_boot: bool = False,
 	) -> None:
 		"""Configure the monitor for a Hikari app.
@@ -36,7 +38,12 @@ class DropsMonitor:
 		self.interval_minutes = max(1, int(interval_minutes))
 		self.store = DropsStateStore(state_path)
 		self.fetcher = DropsFetcher()
-		self.notifier = DropsNotifier(app, GuildConfigStore(guild_store_path))
+		self.notifier = DropsNotifier(
+			app,
+			GuildConfigStore(guild_store_path),
+			FavoritesStore(favorites_store_path),
+			get_game_catalog(),
+		)
 		self.notify_on_boot = notify_on_boot
 		self._task: Optional[asyncio.Task] = None
 
