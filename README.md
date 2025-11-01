@@ -23,12 +23,16 @@ Surfacing ACTIVE Twitch Drops, fuzzy search by game, pretty reward collages, and
 When the bot is added to a server, you can call the following commands.
 
 ### [📜](#commands) Commands
-- `/hello` — Quick health check
-- `/help` — What DropScout does, and the available commands
-- `/drops_active` — List ACTIVE campaigns (with collages)
-- `/drops_this_week` — ACTIVE campaigns ending before next Monday (UTC)
-- `/drops_search_game` <query> — Best matching game with active drops
-- `/drops_set_channel` [channel] — Configure notifications channel for this server
-- `/drops_channel` — Show the configured channel (or default)
+- `/hello` — Quick health check.
+- `/help` — What DropScout does and the available commands.
+- `/drops_active` — List ACTIVE campaigns (with reward collages).
+- `/drops_this_week` — ACTIVE campaigns ending before next Monday (UTC).
+- `/drops_search_game` `<game>` — Pick a game from autocomplete suggestions to see its active Drops.
+- `/drops_set_channel` `[channel]` — Configure the notifications channel for this server (defaults to the current channel).
+- `/drops_channel` — Show the configured notifications channel (or the default).
+- `/drops_favorites view` — Show the games you follow for Drop alerts in this server.
+- `/drops_favorites add` `<game>` — Add a game to your favorites list (uses autocomplete suggestions).
+- `/drops_favorites check` — Check for active Drops for your favorites right now and post alerts.
+- `/drops_favorites remove` `<game>` — Remove a game from your favorites list.
 
 #
