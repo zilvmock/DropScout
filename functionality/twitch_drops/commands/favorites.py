@@ -286,7 +286,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				await ctx.respond("Could not resolve your user information.", ephemeral=True)
 				return
 			try:
-				await ctx.defer()
+				await ctx.defer(ephemeral=True)
 			except Exception:
 				pass
 			else:
