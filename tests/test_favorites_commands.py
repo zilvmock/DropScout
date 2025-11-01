@@ -163,35 +163,24 @@ async def test_check_sends_now_active_messages(monkeypatch, favorites_group):
 
 	monkeypatch.setattr(shared, "get_campaigns_cached", fake_campaigns)
 
-	sent_messages = []
-
-	class FakeRest:
-		async def create_message(self, channel_id, content=None, embeds=None):
-			sent_messages.append((int(channel_id), content, embeds))
-
-	class FakeApp:
-		def __init__(self) -> None:
-			self.rest = FakeRest()
-
-	class FakeClient:
-		def __init__(self) -> None:
-			self.app = FakeApp()
-
 	class FakeCtx:
 		def __init__(self) -> None:
 			self.guild_id = 123
 			self.channel_id = 999
 			self.user = type("User", (), {"id": 42})()
-			self.client = FakeClient()
+			self.client = type("Client", (), {"app": object()})()
+			self.deferred = False
+			self.edited_initial: dict | None = None
+			self.respond_calls: list[dict] = []
 
 		async def defer(self, *args, **kwargs):
-			return
+			self.deferred = True
 
-		async def respond(self, *args, **kwargs):
-			raise AssertionError("respond should not be called in success case")
+		async def respond(self, **kwargs):
+			self.respond_calls.append(kwargs)
 
-		async def edit_initial_response(self, *args, **kwargs):
-			return
+		async def edit_initial_response(self, **kwargs):
+			self.edited_initial = kwargs
 
 		async def delete_last_response(self, *args, **kwargs):
 			return
@@ -214,9 +203,14 @@ async def test_check_sends_now_active_messages(monkeypatch, favorites_group):
 	bound_invoke = check_cmd.invoke.__get__(cmd_instance, check_cmd)
 	await bound_invoke(ctx)
 
-	assert sent_messages, "Expected at least one message sent"
-	channel_id, content, embeds = sent_messages[0]
-	assert channel_id == 999
-	assert "<@42>" in (content or "")
-	assert embeds and embeds[0].title
-	assert finalized[-1] is None
+	payload = ctx.edited_initial or (ctx.respond_calls[-1] if ctx.respond_calls else None)
+	assert payload is not None, "Expected the deferred response to be edited"
+	assert payload.get("embeds"), "Expected embeds in payload"
+	first_embed = payload["embeds"][0]
+	assert first_embed.title and "Valorant" in first_embed.title
+	components = payload.get("components")
+	if components:
+		row_payload, attachments = components[0].build()
+		assert row_payload["components"][0]["label"] == "Previous"
+		assert attachments == ()
+	assert finalized == []

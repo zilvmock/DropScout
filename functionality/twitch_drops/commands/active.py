@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""
+Legacy `/drops_active` command module.
+
+The command is benched and not registered by default, but retained for
+potential future use or reference.
+"""
+
 from datetime import datetime, timezone
 from typing import List
 

@@ -166,3 +166,11 @@ class SharedContext:
         for i in range(0, len(embeds), 10):
             chunk = embeds[i : i + 10]
             await ctx.respond(embeds=chunk)
+
+
+def mark_deferred(ctx: Any) -> None:
+    """Mark a context as deferred so finalize_interaction knows to clean up."""
+    try:
+        setattr(ctx, "_dropscout_deferred", True)
+    except Exception:
+        pass

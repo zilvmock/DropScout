@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""
+Legacy `/drops_this_week` command module.
+
+The command is benched and no longer registered by default, but remains in the
+codebase for potential reactivation.
+"""
+
 from datetime import datetime, timezone, timedelta
 from typing import List
 
