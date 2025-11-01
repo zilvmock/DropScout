@@ -1,3 +1,5 @@
+import pytest
+
 from functionality.twitch_drops.game_catalog import GameCatalog, GameEntry
 from functionality.twitch_drops.models import CampaignRecord, BenefitRecord
 
@@ -106,3 +108,42 @@ def test_search_filters_out_non_matches(tmp_path):
 	)
 
 	assert catalog.search("zzz") == []
+
+
+def test_merge_from_campaign_records_adds_aliases(tmp_path):
+	catalog = GameCatalog(str(tmp_path / "catalog.json"))
+	campaign = CampaignRecord(
+		id="1",
+		name="Winter Bash",
+		status="ACTIVE",
+		game_name="My Game",
+		game_slug="my-game",
+		game_box_art=None,
+		starts_at=None,
+		ends_at=None,
+		benefits=[BenefitRecord(id="b", name="Reward", image_url=None)],
+	)
+	assert catalog.merge_from_campaign_records([campaign]) is True
+	entry = catalog.get("My Game")
+	assert entry is not None
+	assert "my-game" in entry.aliases
+
+
+def test_merge_state_snapshot_handles_invalid(tmp_path):
+	catalog = GameCatalog(str(tmp_path / "catalog.json"))
+	snapshot = {
+		"good": {"game_name": "Valid Game", "game_box_art": "https://example"},
+		"bad": {"game_name": ""},
+		"also_bad": "not a dict",
+	}
+	assert catalog.merge_state_snapshot(snapshot) is True
+	assert catalog.get("Valid Game") is not None
+
+
+@pytest.mark.asyncio
+async def test_ready_event_waits(tmp_path):
+	catalog = GameCatalog(str(tmp_path / "catalog.json"))
+	assert await catalog.wait_ready(timeout=0.05) is False
+	catalog.set_ready(True)
+	assert catalog.is_ready() is True
+	assert await catalog.wait_ready(timeout=0.05) is True
