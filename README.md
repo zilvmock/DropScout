@@ -13,7 +13,7 @@ Surfacing ACTIVE Twitch Drops, fuzzy search by game, pretty reward collages, and
 # 
 
 <p align="center">
-  <a href="https://discord.com/oauth2/authorize?client_id=1413580901165563987&permissions=8&scope=bot">
+  <a href="https://discord.com/oauth2/authorize?client_id=1413580901165563987&scope=bot">
     <img src="https://img.shields.io/badge/Add%20to%20Discord-5865F2?style=flat&logo=discord&logoColor=white" 
          alt="Add to Discord"
          width="200"/>

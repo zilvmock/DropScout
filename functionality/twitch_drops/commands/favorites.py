@@ -334,7 +334,10 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			else:
 				message = f"**{entry.name}** is already in your favorites."
 
-			active = await _find_active_campaigns(shared, entry)
+			try:
+				active = await asyncio.wait_for(_find_active_campaigns(shared, entry), timeout=5)
+			except asyncio.TimeoutError:
+				active = []
 			embed, components = _build_overview(app, shared, guild_id, user_id)
 			if active:
 				lines = []
