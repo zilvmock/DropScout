@@ -181,6 +181,12 @@ async def _on_guild_join(event: hikari.GuildJoinEvent) -> None:
 				_guild_store.set_channel_id(gid, int(scid))
 		except Exception:
 			pass
+	channel_id = _guild_store.get_channel_id(gid)
+	if channel_id is not None:
+		try:
+			await bot.rest.create_message(channel_id, "Hello 👋 – use `/help` to see what I can do.")
+		except Exception:
+			pass
 
 
 # Run the bot
