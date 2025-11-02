@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import List, Optional, Tuple, Sequence
 
 import hikari
@@ -58,10 +57,9 @@ def _build_overview(
 	description = (
 		"\n".join(lines)
 		if lines
-		else "You have no favorite games yet. Use `/drops_favorites add` to follow games you care about."
+		else "You have no favorite games yet."
 	)
 	embed = hikari.Embed(title="Favorite Games", description=description[:4096])
-	embed.set_footer("Use `/drops_favorites add` to add more games.")
 
 	components: List[hikari.api.special_endpoints.ComponentBuilder] = []
 	try:
@@ -86,25 +84,6 @@ def _build_overview(
 			pass
 
 	return embed, components
-
-
-async def _find_active_campaigns(shared: SharedContext, entry: GameEntry | None) -> list[CampaignRecord]:
-	if entry is None:
-		return []
-	try:
-		recs = await shared.get_campaigns_cached()
-	except Exception:
-		return []
-	matches: list[CampaignRecord] = []
-	for rec in recs:
-		if rec.status != "ACTIVE":
-			continue
-		try:
-			if shared.game_catalog.matches_campaign(entry, rec):
-				matches.append(rec)
-		except Exception:
-			continue
-	return matches
 
 
 async def _send_ephemeral_response(
@@ -335,21 +314,7 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 			else:
 				message = f"**{entry.name}** is already in your favorites."
 
-			try:
-				active = await asyncio.wait_for(_find_active_campaigns(shared, entry), timeout=5)
-			except asyncio.TimeoutError:
-				active = []
 			embed, components = _build_overview(app, shared, guild_id, user_id)
-			if active:
-				lines = []
-				for rec in active[:5]:
-					ending = f" – ends <t:{rec.ends_ts}:R>" if rec.ends_ts else ""
-					lines.append(f"- **{rec.name}**{ending}")
-				embed.add_field(
-					name="Active Campaigns Right Now",
-					value="\n".join(lines)[:1024],
-					inline=False,
-				)
 
 			await _send_ephemeral_response(
 				ctx,
