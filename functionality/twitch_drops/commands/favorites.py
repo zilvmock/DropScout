@@ -117,8 +117,8 @@ def _build_favorite_pages(
 	shared: SharedContext,
 	favorites: list[str],
 	campaigns: list[CampaignRecord],
-) -> list[tuple[GameEntry, list[CampaignRecord]]]:
-	results: list[tuple[GameEntry, list[CampaignRecord]]] = []
+) -> list[tuple[GameEntry, CampaignRecord, int, int]]:
+	results: list[tuple[GameEntry, CampaignRecord, int, int]] = []
 	for key in favorites:
 		entry = shared.game_catalog.get(key)
 		if entry is None:
@@ -133,33 +133,32 @@ def _build_favorite_pages(
 			except Exception:
 				continue
 		matches.sort(key=lambda rec: rec.ends_ts or (10**10))
-		results.append((entry, matches))
+		total = len(matches)
+		for idx, match in enumerate(matches, start=1):
+			results.append((entry, match, idx, total))
 	return results
 
 
 def _build_check_page_payload(
 	app: hikari.RESTAware,
 	user_id: int,
-	pages: list[tuple[GameEntry, list[CampaignRecord]]],
+	pages: list[tuple[GameEntry, CampaignRecord, int, int]],
 	index: int,
 ) -> tuple[str, list[hikari.Embed], list[hikari.api.special_endpoints.ComponentBuilder]]:
 	total = len(pages)
 	index = max(0, min(index, total - 1))
-	entry, campaigns = pages[index]
-	content = f"Active Drops for **{entry.name}** ({index + 1}/{total})"
+	entry, campaign, campaign_index, campaign_total = pages[index]
 	embeds: list[hikari.Embed] = []
-	for campaign in campaigns[:10]:
-		embed = build_campaign_embed(campaign, title_prefix="Favorite Active")
-		if campaign.benefits and campaign.benefits[0].image_url:
-			embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
-		embeds.append(embed)
-	if not embeds:
-		embed = hikari.Embed(title=entry.name, description="No active campaigns right now.")
-		embeds.append(embed)
-	else:
-		remaining = len(campaigns) - len(embeds)
-		if remaining > 0:
-			embeds[-1].set_footer(f"+{remaining} more campaign(s) not shown in this view.")
+	embed = build_campaign_embed(campaign, title_prefix="Favorite Active")
+	if campaign.benefits and campaign.benefits[0].image_url:
+		embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
+	if campaign_total > 1:
+		embed.set_footer(f"{entry.name}: campaign {campaign_index} of {campaign_total}")
+	embeds.append(embed)
+	content = (
+		f"Active Drops for **{entry.name}** "
+		f"[{campaign_index}/{campaign_total}] | ({index + 1}/{total})"
+	)
 
 	components: list[hikari.api.special_endpoints.ComponentBuilder] = []
 	if total > 1:
