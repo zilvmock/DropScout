@@ -420,10 +420,12 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
 				return
 
 			removed = shared.favorites_store.remove_favorite(guild_id, user_id, key)
+			entry = shared.game_catalog.get(key)
+			name = entry.name if entry else key
 			if removed:
-				message = "Removed that game from your favorites."
+				message = f"Removed **{name}** from your favorites."
 			else:
-				message = "That game is not currently in your favorites."
+				message = f"**{name}** is not currently in your favorites."
 
 			embed, components = _build_overview(app, shared, guild_id, user_id)
 			await _send_ephemeral_response(
