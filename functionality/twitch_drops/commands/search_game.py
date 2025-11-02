@@ -8,10 +8,12 @@ import hikari
 import lightbulb
 from lightbulb import context as lb_context
 from lightbulb.commands import options as opt
+from hikari.files import Bytes
 
 from ..embeds import build_campaign_embed
 from ..game_catalog import GameEntry
 from ..models import CampaignRecord
+from ..images import build_benefits_collage
 from .common import SharedContext, mark_deferred
 
 CUSTOM_ID_PREFIX = "drops:search"
@@ -67,7 +69,8 @@ def _resolve_user_id(ctx: lightbulb.Context) -> int | None:
         return None
 
 
-def _build_page_payload(
+async def _build_page_payload(
+    shared: SharedContext,
     entry: GameEntry,
     campaigns: list[CampaignRecord],
     index: int,
@@ -79,7 +82,19 @@ def _build_page_payload(
     index = max(0, min(index, total - 1))
     campaign = campaigns[index]
     embed = build_campaign_embed(campaign, title_prefix="Selected Game")
-    if campaign.benefits and campaign.benefits[0].image_url:
+    png = fname = None
+    try:
+        png, fname = await build_benefits_collage(
+            campaign,
+            limit=shared.ICON_LIMIT if shared.ICON_LIMIT >= 0 else 9,
+            icon_size=(shared.ICON_SIZE, shared.ICON_SIZE),
+            columns=shared.ICON_COLUMNS,
+        )
+    except Exception:
+        png = fname = None
+    if png and fname:
+        embed.set_image(Bytes(png, fname))
+    elif campaign.benefits and campaign.benefits[0].image_url:
         embed.set_image(campaign.benefits[0].image_url)  # type: ignore[arg-type]
     embed.set_footer(f"Campaign {index + 1}/{total}")
     content = f"Active Drops for **{entry.name}** ({index + 1}/{total})"
@@ -167,7 +182,8 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
                 token = secrets.token_urlsafe(8)
                 _store_session(token, entry.key)
 
-            content, embeds, components = _build_page_payload(
+            content, embeds, components = await _build_page_payload(
+                shared,
                 entry,
                 matches,
                 0,
@@ -271,7 +287,8 @@ def register(client: lightbulb.Client, shared: SharedContext) -> str:
                     pass
                 return
             target_index = max(0, min(target_index, len(matches) - 1))
-            content, embeds, components = _build_page_payload(
+            content, embeds, components = await _build_page_payload(
+                shared,
                 entry,
                 matches,
                 target_index,
