@@ -101,8 +101,9 @@ class DropsNotifier:
 		users.sort()
 		return users
 
-	def _join_mentions(self, user_ids: Iterable[int], *, limit: int) -> str:
+	def _join_mentions(self, user_ids: Iterable[int], *, limit: int) -> tuple[str, list[int]]:
 		mentions: list[str] = []
+		included_ids: list[int] = []
 		total = 0
 		for uid in sorted(dict.fromkeys(int(u) for u in user_ids)):
 			token = f"<@{uid}>"
@@ -112,8 +113,9 @@ class DropsNotifier:
 					mentions.append("…")
 				break
 			mentions.append(token)
+			included_ids.append(uid)
 			total += added
-		return " ".join(mentions)
+		return " ".join(mentions), included_ids
 
 	async def notify(self, diff: DropsDiff) -> None:
 		"""Post embeds for any newly ACTIVE campaigns (with reward collages)."""
@@ -155,10 +157,12 @@ class DropsNotifier:
 				keys = self._resolve_campaign_keys(campaign)
 				watchers = self._collect_watchers(favorites_map, keys)
 				content = None
+				user_mentions = hikari.UNDEFINED
 				if watchers:
-					mention_text = self._join_mentions(watchers, limit=1800)
+					mention_text, included = self._join_mentions(watchers, limit=1800)
 					if mention_text:
 						content = f"Favorites alert: {mention_text}"
+						user_mentions = included or hikari.UNDEFINED
 				try:
 					if png_bytes and filename:
 						attachment = Bytes(png_bytes, filename)
@@ -167,12 +171,14 @@ class DropsNotifier:
 							target.channel_id,
 							content=content,
 							embeds=[embed],
+							user_mentions=user_mentions,
 						)
 					else:
 						await self.app.rest.create_message(
 							target.channel_id,
 							content=content,
 							embeds=[embed],
+							user_mentions=user_mentions,
 						)
 				except Exception:
 					pass

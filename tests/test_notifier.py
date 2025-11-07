@@ -12,7 +12,7 @@ class StubRest:
 	def __init__(self, guild_id: int, channel_id: int):
 		self._guild_id = guild_id
 		self._channel_id = channel_id
-		self.sent: list[tuple[int, str | None, list]] = []
+		self.sent: list[tuple[int, str | None, list, dict]] = []
 
 	class _Guild:
 		def __init__(self, guild_id: int):
@@ -23,7 +23,7 @@ class StubRest:
 		return [self._Guild(self._guild_id)]
 
 	async def create_message(self, channel_id, *, content=None, embeds=None, **kwargs):
-		self.sent.append((int(channel_id), content, list(embeds or [])))
+		self.sent.append((int(channel_id), content, list(embeds or []), dict(kwargs)))
 
 
 class StubApp:
@@ -86,10 +86,11 @@ async def test_notifier_posts_collage_and_mentions(monkeypatch, tmp_path):
 	await notifier.notify(diff)
 
 	assert rest.sent, "notification should be sent"
-	channel_id, content, embeds = rest.sent[0]
+	channel_id, content, embeds, kwargs = rest.sent[0]
 	assert channel_id == 999
 	assert "<@111>" in (content or "")
 	assert "<@222>" in (content or "")
+	assert kwargs.get("user_mentions") == [111, 222]
 	assert embeds and embeds[0].title == "Valorant"
 	assert embeds[0].image is not None
 
@@ -103,7 +104,7 @@ def test_join_mentions_truncates(tmp_path):
 	notifier = DropsNotifier(app, guild_store, favorites, catalog)
 
 	ids = [100 + i for i in range(10)]
-	text = notifier._join_mentions(ids, limit=15)
+	text, included = notifier._join_mentions(ids, limit=15)
 	assert text.endswith("…")
-	# Should include at least the first user mention
-	assert "<@100>" in text
+	# Should include at least the first user mention and capture IDs for allowed mentions
+	assert included and included[0] == 100
